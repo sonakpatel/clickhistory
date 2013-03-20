@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <script type="text/javascript" src="scripts/jquery-1.6.2.js"></script>
+    <script type="text/javascript" src="scripts/dateformat.js"></script>
+    <script type="text/javascript" src="http://ajax.microsoft.com/ajax/jquery.templates/beta1/jquery.tmpl.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.4/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="scripts/linq.min.js" ></script>
+    <script type="text/javascript" src="scripts/jquery.linq.min.js" ></script>
+    <script type="text/javascript" src="scripts/jquery.timeago.js" ></script>
+    <script type="text/javascript" src="scripts/jshashtable-2.1.js" ></script>
+    <script type="text/javascript" src="scripts/jquery.numberformatter-1.2.1.jsmin.js" ></script>
+    <style type="text/css">
+
+        table#tblLive th
+        {
+            border: 1px solid;
+            font-family: Helvetica;
+            text-align: center;
+            font-size: 15px;
+        }
+        table#tblLive th#right-border
+        {
+            padding: 0 4px 0 3px;
+            border-right: solid 1px #bbb;
+        }
+        tbody#tbl-content td
+        {
+            border: 1px solid #bbb;
+        }
+
+        table
+        {
+            empty-cells: show;
+			text-align: left;
+			width: auto;
+        }
+		tr.alt td
+		{
+			background: #8CB5DE;
+		}
+		tr.over td, tr:hover td
+		{
+			background: #C2C2C2;
+		}
+        td, th, tbody, div, span, p, input, textarea, option, button, h6, h2
+        {
+            font-family: Helvetica;
+            font-size: 18px;
+            overflow: hidden;
+        }
+        h2
+        {
+            font-size: 16px;
+        }
+        td, th
+        {
+            background-color: #CCE6FF;
+            padding: 1px 5px 1px 5px;
+        }
+        img
+        {
+            margin-left: auto;
+            margin-right: auto;
+			max-width: 100%;
+			height:100px;
+		}
+    </style>
+</head>
+<body>
+    <table class="stripeMe" id="tblLive" cellpadding="3" cellspacing="0" border="0">
+        <thead>
+            <th style="width: 4%">
+                Metric
+            </th>
+            <th style="width: 15%">
+                Campaign
+            </th>
+            <th style="width: 5%">
+                Network
+            </th>
+            <th style="width: 5%">
+                Revenue
+            </th>
+            <th style="width: 25%">
+                Product
+            </th>
+            <th style="width: 21%">
+                Image
+            </th>
+            <th id="right-border" style="width: 15%;">
+                How long ago?
+            </th>
+            <th id="right-border" style="width: 15%;">
+                Date
+            </th>
+        </thead>
+        <tbody id="tbl-content">
+        </tbody>
+    </table>
+
+    <script id="tmlplClickRow" type="text/x-jquery-tmpl">
+		<tr>
+            <td style="text-align: center; width:4%;">${costMetricKind}</td>
+			<td style="width:15%">${campaignName}</td>
+			<td style="text-align: center; width:5%;">${networkName}</td>
+            <td style="text-align: center; width:5%;">${clickRevenue}</td>
+            <td style="width:25%">${name}</td>
+            <td style="text-align:center;vertical-align:middle; background:white"><img src="${url}"/></td>
+            <td style="width:15%">${jQuery.timeago(date)}</td>
+            <td style="width:15%">${trimDate(date)}</td>
+		</tr>
+    </script>
+    <script type="text/javascript">
+        var buffer = [];
+        var liveClicks = [];
+        var bufTimer, liveTimer;
+
+        $(document).ready(function() {
+            $(".stripeMe tr").mouseover(function() {
+                $(this).addClass("over");
+            }).mouseout(function() {
+                $(this).removeClass("over");
+            });
+
+            liveTimer = setInterval("RenderLive()", 1000);
+            bufTimer = setInterval("LoadData()", 8000);
+            LoadData(); //Convert to load to a buffer
+        });
+
+        function LoadData() {
+            //get latest id in buffer array
+            if (buffer.length > 0) latestID = buffer[0].id;
+            else if (liveClicks.length > 0) latestID = liveClicks[0].id;
+            else latestID = "";
+            var url = latestID == "" ? "{JSON url}" : "{JSON url}/" + latestID;
+
+            $.ajax({
+                dataType: "jsonp",
+                type: 'get',
+                url: url + "?recordcount=80",
+                success: function(data) {
+                    //Stop
+                    //Load data into a buffer
+                    data.ts = new Date(parseInt(data.ts.match(/[0-9-]+/)[0]));
+                    data.clicks = Enumerable.From(data.clicks).Select(function(x) {
+                        x.date = new Date(parseInt(x.date.match(/[0-9-]+/)[0]));
+                        if (x.url == "") x.url = "./chiching.jpeg";
+                        if (x.costMetricKind == 1) x.costMetricKind = "CPC";
+                        if (x.costMetricKind == 2) x.costMetricKind = "CPM";
+                        if (x.costMetricKind == 3) x.costMetricKind = "CPA";
+                        var round = "£" + Math.round(x.clickRevenue * 100) / 100;
+                        x.clickRevenue = round.toString();
+
+                        return x;
+                    }).ToArray();
+                    RefreshBuff(data);
+                },
+                beforeSend: function() {
+                    $("#spinnerPausedAlerts").show();
+                },
+                complete: function(response) {
+                    $("#spinnerPausedAlerts").hide();
+                },
+                error: function(jqXHR, textStatus, errorThrown) {
+                    alert("Error loading data: " + textStatus + "\nPlease refresh the page after a moment.");
+                    clearInterval(bufTimer);
+                }
+            });
+
+            jQuery(document).ajaxError(function(event, request, settings) {
+                alert("Connection Error");
+            });
+        }
+
+        function RefreshBuff(data) {
+            var abc = Enumerable.From(data.clicks)
+                .Select(function(x) {
+                return x;
+            }).ToArray();
+            buffer = abc.concat(buffer);
+        }
+
+        function RenderLive() {
+            var now = new Date();
+            var exec;
+            now.setSeconds(now.getUTCSeconds() - 20, now.getUTCMilliseconds());
+
+            while (buffer.length > 0) {
+                if (buffer[buffer.length - 1].date < now) {
+                    liveClicks.unshift(buffer.pop());
+                    exec = true;
+                } else {
+                    break;
+                }
+            }
+            if (exec) {
+                updateTables();
+                exec = false;
+            }
+            if (liveClicks.length > 7)
+                liveClicks.splice(7, liveClicks.length - 1);
+        }
+
+        function updateTables() {
+            //Show live table
+            // append the rendered template liveClicks to the table
+            $("#tmlplClickRow").tmpl(liveClicks).prependTo("#tblLive > tbody:last");
+
+            //trim down liveClicks table
+            if ($("#tblLive > tbody:last tr").size() > 7) {
+                $("#tblLive").find("tr:gt(7)").remove();
+            }
+            $(".stripeMe tr:even").addClass("alt");
+        }
+
+        function trimDate(date) {
+            return date.toString().slice(0, 24);
+        }
+    </script>
+
+</body>
+</html>
